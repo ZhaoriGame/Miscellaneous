@@ -27,6 +27,9 @@ Material:
     m_Ints: []
     m_Floats:
     - _DstBlend: 6
+    - _Metallic: 0
+    - _Roughness: 0.57
+    - _Specular: 0.63
     - _SrcBlend: 2
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}

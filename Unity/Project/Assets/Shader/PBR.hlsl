@@ -102,15 +102,40 @@ float D_GGX(half3 N,half3 H,float a)
    return nom / denom;
 }
 
-half4 FragmentPBR(half3 normalWS,half3 viewDirWS,half3 lightDirWS)
+half Distribution(float roughness, float nh)
 {
-   //D
-   half4 color;
-   half3 halfDir = normalize(viewDirWS + lightDirWS);
-   float ggXValue =  D_GGX(normalWS,halfDir,_Roughness);
-   
-   return half4(ggXValue,ggXValue,ggXValue,1);  
+   float lerpSquareRoughness = pow(lerp(0.002,1,roughness),2);
+   float d = lerpSquareRoughness/(pow((pow(nh,2)*(lerpSquareRoughness-1)+1),2)* PI);
+   return d;
 }
+
+half Geometry(float roughness, float nl , float nv)
+{
+   //直接光照
+   float kInDirectLight = pow(roughness+ 1,2)/ 8;
+   //间接光照(IBL)
+   float kInIBL = pow(roughness,2) / 8;
+   float GLeft = nl / lerp(nl,1,kInDirectLight);
+   float GRight = nv/lerp(nv,1,kInDirectLight);
+   float G = GLeft*GRight;
+   return G;
+}
+
+half3 FresnelEquation(float3 F0, float vh)
+{
+   half3 F = F0 + (1-F0) * exp2((-5.55473 * vh - 6.98316)* vh);
+   return F;
+}
+
+// half4 FragmentPBR(half3 normalWS,half3 viewDirWS,half3 lightDirWS)
+// {
+//    //D
+//    half4 color;
+//    half3 halfDir = normalize(viewDirWS + lightDirWS);
+//    //float ggXValue =  D_GGX(normalWS,halfDir,_Roughness);
+//   
+//    return half4(ggXValue,ggXValue,ggXValue,1);  
+// }
 
 //https://zhuanlan.zhihu.com/p/364932774
 half4 PBRFragment(Varyings input) : SV_Target
@@ -134,11 +159,59 @@ half4 PBRFragment(Varyings input) : SV_Target
    float NDotL = max(saturate(dot(normalWS,lightDirWS)),0.00001);
    float NDotV = max(saturate(dot(normalWS,viewDirWS)),0.00001);
    float VDotH = max(saturate(dot(viewDirWS,halfDirWS)),0.00001);
+   float LDotH = max(saturate(dot(lightDirWS,halfDirWS)),0.00001);
+   float NDotH = max(saturate(dot(normalWS,halfDirWS)),0.00001);
 
    
-   half4 color = FragmentPBR(normalWS,viewDirWS,lightDirWS);
+   half D =  Distribution(roughness,NDotH);
+   half G =  Geometry(roughness,NDotL,NDotV);
+   float3 F0 = lerp(float3(0.04,0.04,0.04), Albedo, _Metallic);
+   half3 F = FresnelEquation(F0,VDotH);
+
    
-   return color;
+   half3 SpecularResult = (D*G*F) / (NDotV * NDotL *4);
+   half3 speColor = SpecularResult * lightColor * NDotL * PI;
+
+   speColor = saturate(speColor);
+
+   half3 kd = (1- F) * (1- _Metallic);
+   half3 diffuseColor = kd * Albedo * lightColor * NDotL;
+
+   half3 directionLight = speColor + diffuseColor;
+
+
+   
+
+   // //***********间接光照-镜面反射部分********* 
+   // half mip = CubeMapMip(_Roughness);                              //计算Mip等级，用于采样CubeMap
+   // float3 reflectVec = reflect(-viewDir, i.normal);                //计算反射向量，用于采样CubeMap
+   //
+   // half4 rgbm = UNITY_SAMPLE_TEXCUBE_LOD(unity_SpecCube0, reflectVec, mip);
+   // float3 iblSpecular = DecodeHDR(rgbm, unity_SpecCube0_HDR);      //采样CubeMap之后，储存在四维向量rgbm中，然后在使用函数DecodeHDR解码到rgb
+   //
+   // half surfaceReduction=1.0/(roughness*roughness+1.0);            //压暗非金属的反射
+   //
+   // float oneMinusReflectivity = unity_ColorSpaceDielectricSpec.a-unity_ColorSpaceDielectricSpec.a*_Metallic;
+   // half grazingTerm=saturate((1 - _Roughness)+(1-oneMinusReflectivity));
+   // half t = Pow5(1-nv);
+   // float3 FresnelLerp =  lerp(F0,grazingTerm,t);                   //控制反射的菲涅尔和金属色
+   //
+   // float3 iblSpecularResult = surfaceReduction*iblSpecular*FresnelLerp;
+   // //***********间接光照-镜面反射部分完成********* 
+   //
+   // //***********间接光照-漫反射部分********* 
+   // half3 iblDiffuse = ShadeSH9(float4(normal,1));                  //获取球谐光照
+   //
+   // float3 Flast = fresnelSchlickRoughness(max(nv, 0.0), F0, roughness);
+   // float kdLast = (1 - Flast) * (1 - _Metallic);                   //压暗边缘，边缘处应当有更多的镜面反射
+   //
+   // float3 iblDiffuseResult = iblDiffuse * kdLast * Albedo;
+   // //***********间接光照-漫反射部分完成********* 
+   // float3 indirectResult = iblSpecularResult + iblDiffuseResult;
+   // //***********间接光照完成********* 
+
+   
+   return half4(directionLight.xyz,1);
 }
 
 
